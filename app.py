@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Stock Watch", page_icon="📈", layout="centered")
 st.title("📈 Stock Watch（Yahoo）")
 
-# ✅ 台股配色：漲紅、跌綠、平盤灰
+# 台股配色：漲紅、跌綠、平盤灰
 def tw_color(value: float) -> str:
     if value > 0:
         return "#d60000"  # 紅
@@ -45,40 +45,57 @@ def google_news_rss(query: str):
 def fetch_quote(symbol: str):
     """
     回傳：latest_price, prev_close, fetched_at_str
+    yahooquery 在雲端偶爾會回 None / 結構不同，這裡做完整保護避免 App 掛掉
     """
-    t = Ticker(symbol)
-    price = t.price.get(symbol, {})
-    summary = t.summary_detail.get(symbol, {})
-
-    latest = price.get("regularMarketPrice")
-    prev_close = summary.get("previousClose")
-
-    # ✅ 取資料時間（用台灣時間）
     fetched_at = datetime.now().strftime("%Y年%m月%d日 %H:%M")
 
-    return latest, prev_close, fetched_at
+    try:
+        t = Ticker(symbol)
+
+        # price：可能是 None / dict / 或 symbol key 不存在
+        price_map = t.price or {}
+        price = price_map.get(symbol) or {}
+        if not isinstance(price, dict):
+            price = {}
+
+        # summary_detail：也可能是 None / dict / 或 symbol key 不存在
+        summary_map = t.summary_detail or {}
+        summary = summary_map.get(symbol) or {}
+        if not isinstance(summary, dict):
+            summary = {}
+
+        latest = price.get("regularMarketPrice")
+
+        # 昨收：summary_detail 沒有就用 price 的 previous close 當備援
+        prev_close = summary.get("previousClose")
+        if prev_close is None:
+            prev_close = price.get("regularMarketPreviousClose")
+
+        return latest, prev_close, fetched_at
+
+    except Exception:
+        return None, None, fetched_at
 
 def show_price_panel(symbol: str, display_name: str):
     latest, prev_close, fetched_at = fetch_quote(symbol)
 
-    if latest is None or prev_close is None:
-        st.error(f"抓不到 {display_name} 的資料（Yahoo: {symbol}）")
-        return
-
-    diff = latest - prev_close
-    diff_pct = (diff / prev_close * 100) if prev_close != 0 else 0
-
-    st.subheader(f" {display_name}")
-
-    # ✅ 旁邊備註抓取時間
+    st.subheader(f"✅ {display_name}")
     st.caption(f"資料抓取時間：{fetched_at}")
 
-    price_color = "#FFFFFF"
+    # 抓不到就不要讓整頁掛掉
+    if latest is None or prev_close is None:
+        st.warning(f"{display_name} 目前抓不到報價（Yahoo: {symbol}），可能暫時被限制或資料延遲，稍後重整再試。")
+        return
+
+    diff = float(latest) - float(prev_close)
+    diff_pct = (diff / float(prev_close) * 100) if float(prev_close) != 0 else 0
+
+    price_color = "#111111"  # 最新價用深色
     change_color = tw_color(diff)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        render_tw_metric("目前股價", f"{latest:,.2f}", price_color)
+        render_tw_metric("目前股價", f"{float(latest):,.2f}", price_color)
     with c2:
         render_tw_metric("漲跌", f"{diff:+.2f}", change_color)
     with c3:
@@ -91,7 +108,7 @@ def render_news(key_prefix: str, default_query: str):
         return
 
     feed = feedparser.parse(google_news_rss(query))
-    if not feed.entries:
+    if not getattr(feed, "entries", None):
         st.info("目前抓不到新聞，可能 RSS 暫時無資料或網路限制。")
         return
 
@@ -109,3 +126,4 @@ with tab2:
     show_price_panel("0050.TW", "0050 元大台灣50")
     st.divider()
     render_news("t0050", "0050 元大台灣50")
+
