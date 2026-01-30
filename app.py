@@ -93,6 +93,9 @@ def fetch_twse_quote(code: str):
 
     except Exception:
         return None, None, fetched_at
+    st.write("HTTP status:", r.status_code)
+    st.write("Text head:", r.text[:200])
+
 
 def show_price_panel(code: str, display_name: str):
     latest, prev_close, fetched_at = fetch_twse_quote(code)
