@@ -1,20 +1,18 @@
 import streamlit as st
-from yahooquery import Ticker
 import feedparser
 import urllib.parse
+import requests
 from datetime import datetime
 
 st.set_page_config(page_title="Stock Watch", page_icon="📈", layout="centered")
-st.title("📈 Stock Watch（Yahoo）")
+st.title("📈 Stock Watch（Yahoo Quote API）")
 
-# 台股配色：漲紅、跌綠、平盤灰
 def tw_color(value: float) -> str:
     if value > 0:
-        return "#d60000"  # 紅
+        return "#d60000"
     elif value < 0:
-        return "#008000"  # 綠
-    else:
-        return "#666666"  # 灰
+        return "#008000"
+    return "#666666"
 
 def render_tw_metric(label: str, value: str, color: str):
     st.markdown(
@@ -43,36 +41,25 @@ def google_news_rss(query: str):
 
 @st.cache_data(ttl=30)
 def fetch_quote(symbol: str):
-    """
-    回傳：latest_price, prev_close, fetched_at_str
-    yahooquery 在雲端偶爾會回 None / 結構不同，這裡做完整保護避免 App 掛掉
-    """
     fetched_at = datetime.now().strftime("%Y年%m月%d日 %H:%M")
 
+    url = "https://query1.finance.yahoo.com/v7/finance/quote"
+    params = {"symbols": symbol}
+    headers = {"User-Agent": "Mozilla/5.0"}
+
     try:
-        t = Ticker(symbol)
+        r = requests.get(url, params=params, headers=headers, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        res = data.get("quoteResponse", {}).get("result", [])
+        if not res:
+            return None, None, fetched_at
 
-        # price：可能是 None / dict / 或 symbol key 不存在
-        price_map = t.price or {}
-        price = price_map.get(symbol) or {}
-        if not isinstance(price, dict):
-            price = {}
-
-        # summary_detail：也可能是 None / dict / 或 symbol key 不存在
-        summary_map = t.summary_detail or {}
-        summary = summary_map.get(symbol) or {}
-        if not isinstance(summary, dict):
-            summary = {}
-
-        latest = price.get("regularMarketPrice")
-
-        # 昨收：summary_detail 沒有就用 price 的 previous close 當備援
-        prev_close = summary.get("previousClose")
-        if prev_close is None:
-            prev_close = price.get("regularMarketPreviousClose")
+        q = res[0]
+        latest = q.get("regularMarketPrice")
+        prev_close = q.get("regularMarketPreviousClose")
 
         return latest, prev_close, fetched_at
-
     except Exception:
         return None, None, fetched_at
 
@@ -82,15 +69,14 @@ def show_price_panel(symbol: str, display_name: str):
     st.subheader(f"✅ {display_name}")
     st.caption(f"資料抓取時間：{fetched_at}")
 
-    # 抓不到就不要讓整頁掛掉
     if latest is None or prev_close is None:
-        st.warning(f"{display_name} 目前抓不到報價（Yahoo: {symbol}），可能暫時被限制或資料延遲，稍後重整再試。")
+        st.warning(f"{display_name} 目前抓不到報價（{symbol}），可能 Yahoo 暫時限制雲端來源，稍後重整再試。")
         return
 
     diff = float(latest) - float(prev_close)
     diff_pct = (diff / float(prev_close) * 100) if float(prev_close) != 0 else 0
 
-    price_color = "#111111"  # 最新價用深色
+    price_color = "#111111"
     change_color = tw_color(diff)
 
     c1, c2, c3 = st.columns(3)
@@ -126,4 +112,3 @@ with tab2:
     show_price_panel("0050.TW", "0050 元大台灣50")
     st.divider()
     render_news("t0050", "0050 元大台灣50")
-
